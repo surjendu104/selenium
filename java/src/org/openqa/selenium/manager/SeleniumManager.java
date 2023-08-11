@@ -16,23 +16,20 @@
 // under the License.
 package org.openqa.selenium.manager;
 
-import static java.nio.file.StandardCopyOption.REPLACE_EXISTING;
 import static org.openqa.selenium.Platform.MAC;
 import static org.openqa.selenium.Platform.WINDOWS;
 
-import java.io.IOException;
 import java.io.InputStream;
-import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.SimpleFileVisitor;
-import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+
 import org.openqa.selenium.Beta;
 import org.openqa.selenium.Capabilities;
 import org.openqa.selenium.Platform;
@@ -59,7 +56,16 @@ public class SeleniumManager {
 
   private static final Logger LOG = Logger.getLogger(SeleniumManager.class.getName());
 
+
+  // IMPORTANT: This version needs to be synchronized before each release.
+  // Alternatively, we can try to use Bazel to automate this task
+  private static final String SELENIUM_MANAGER_VERSION = "0.4.12";
+
   private static final String SELENIUM_MANAGER = "selenium-manager";
+  private static final String DEFAULT_CACHE_PATH = "~/.cache/selenium";
+  private static final String BINARY_PATH_FORMAT = "/manager/%s/%s";
+  private static final String HOME = "~";
+
   private static final String EXE = ".exe";
   private static final String INFO = "INFO";
   private static final String WARN = "WARN";
@@ -68,25 +74,6 @@ public class SeleniumManager {
   private static volatile SeleniumManager manager;
 
   private Path binary;
-
-  /** Wrapper for the Selenium Manager binary. */
-  private SeleniumManager() {
-    Runtime.getRuntime()
-        .addShutdownHook(
-            new Thread(
-                () -> {
-                  if (binary != null && Files.exists(binary)) {
-                    try {
-                      Files.delete(binary);
-                    } catch (IOException e) {
-                      LOG.warning(
-                          String.format(
-                              "%s deleting temporal file: %s",
-                              e.getClass().getSimpleName(), e.getMessage()));
-                    }
-                  }
-                }));
-  }
 
   public static SeleniumManager getInstance() {
     if (manager == null) {
@@ -163,16 +150,17 @@ public class SeleniumManager {
         } else if (current.is(MAC)) {
           folder = "macos";
         }
-        String binaryPath = String.format("%s/%s%s", folder, SELENIUM_MANAGER, extension);
-        try (InputStream inputStream = this.getClass().getResourceAsStream(binaryPath)) {
-          Path tmpPath = Files.createTempDirectory(SELENIUM_MANAGER + System.nanoTime());
 
-          deleteOnExit(tmpPath);
-
-          binary = tmpPath.resolve(SELENIUM_MANAGER + extension);
-          Files.copy(inputStream, binary, REPLACE_EXISTING);
+        binary = getBinaryInCache(SELENIUM_MANAGER + extension);
+        if (!binary.toFile().exists()) {
+          String binaryPathInJar = String.format("%s/%s%s", folder, SELENIUM_MANAGER, extension);
+          try (InputStream inputStream = this.getClass().getResourceAsStream(binaryPathInJar)) {
+            binary.getParent().toFile().mkdirs();
+            Files.copy(inputStream, binary);
+          }
+          binary.toFile().setExecutable(true);
         }
-        binary.toFile().setExecutable(true);
+
       } catch (Exception e) {
         throw new WebDriverException("Unable to obtain Selenium Manager Binary", e);
       }
@@ -180,35 +168,6 @@ public class SeleniumManager {
     LOG.fine(String.format("Selenium Manager binary found at: %s", binary));
 
     return binary;
-  }
-
-  private void deleteOnExit(Path tmpPath) {
-    Runtime.getRuntime()
-        .addShutdownHook(
-            new Thread(
-                () -> {
-                  try {
-                    Files.walkFileTree(
-                        tmpPath,
-                        new SimpleFileVisitor<Path>() {
-                          @Override
-                          public FileVisitResult postVisitDirectory(Path dir, IOException exc)
-                              throws IOException {
-                            Files.delete(dir);
-                            return FileVisitResult.CONTINUE;
-                          }
-
-                          @Override
-                          public FileVisitResult visitFile(Path file, BasicFileAttributes attrs)
-                              throws IOException {
-                            Files.delete(file);
-                            return FileVisitResult.CONTINUE;
-                          }
-                        });
-                  } catch (IOException e) {
-                    // Do nothing. We're just tidying up.
-                  }
-                }));
   }
 
   /**
@@ -303,5 +262,10 @@ public class SeleniumManager {
       return Level.INFO;
     }
     return level;
+  }
+
+  private Path getBinaryInCache(String binaryName) {
+    String cachePath = DEFAULT_CACHE_PATH.replace(HOME, System.getProperty("user.home"));
+    return Paths.get(cachePath + String.format(BINARY_PATH_FORMAT, SELENIUM_MANAGER_VERSION, binaryName));
   }
 }
