@@ -437,37 +437,29 @@ public class DriverService implements Closeable {
       return DEFAULT_TIMEOUT;
     }
 
-    protected OutputStream getLogOutput(String logProperty) {
-      if (logOutputStream != null) {
-        return logOutputStream;
-      }
-
+    protected OutputStream getLogOutput() {
       try {
-        File logFileLocation = getLogFile();
-        String logLocation;
-
-        if (logFileLocation == null) {
-          logLocation = System.getProperty(logProperty);
-        } else {
-          logLocation = logFileLocation.getAbsolutePath();
-        }
-
-        if (logLocation == null) {
-          return ByteStreams.nullOutputStream();
-        }
-
-        switch (logLocation) {
-          case LOG_STDOUT:
-            return System.out;
-          case LOG_STDERR:
-            return System.err;
-          case LOG_NULL:
-            return ByteStreams.nullOutputStream();
-          default:
-            return new FileOutputStream(logLocation);
-        }
+        return logFile != null ? new FileOutputStream(logFile) : logOutputStream;
       } catch (FileNotFoundException e) {
         throw new RuntimeException(e);
+      }
+    }
+
+    protected void parseLogOutput(String logProperty) {
+      if (getLogFile() != null) {
+        return;
+      }
+
+      String logLocation = System.getProperty(logProperty, LOG_NULL);
+      switch (logLocation) {
+        case LOG_STDOUT:
+          withLogOutput(System.out);
+        case LOG_STDERR:
+          withLogOutput(System.err);
+        case LOG_NULL:
+          withLogOutput(ByteStreams.nullOutputStream());
+        default:
+          withLogFile(new File(logLocation));
       }
     }
 
@@ -490,6 +482,8 @@ public class DriverService implements Closeable {
       List<String> args = createArgs();
 
       DS service = createDriverService(exe, port, timeout, args, environment);
+      service.sendOutputTo(getLogOutput());
+
       port = 0; // reset port to allow reusing this builder
 
       return service;
